@@ -10,7 +10,7 @@ It coordinates two current layers:
   OpenTelemetry, Prometheus, Grafana, and related services.
 
 The CLI is intentionally NVIDIA-only. It does not include AMD, Intel, Apple
-Silicon, or CPU-only accelerator abstractions.
+Silicon, or CPU-first accelerator abstractions.
 
 ## Why this exists
 
@@ -19,7 +19,8 @@ workloads. `edge-cli` provides one installable control plane so operators can ru
 preflight checks, installs, validation, status, logs, and safe uninstall flows
 without treating each repository as a disconnected CLI application.
 
-Future repositories can be added as new Go modules under `internal/modules`.
+Future repositories can be added as new layers in `internal/platform` and new Go
+modules under `internal/modules`.
 
 ## Install
 
@@ -99,6 +100,11 @@ edge status
 5. Observability validation.
 6. Next command and URL hints.
 
+An empty local k3s cluster with only the default k3s system components is a
+valid starting point. `edge install infra` is responsible for preparing the
+NVIDIA runtime and GPU Operator layer before any GPU-backed LLM workload is
+installed.
+
 ## Infra Layer
 
 `edge install infra` uses the local `k3s-nvidia-edge` project as the
@@ -122,6 +128,15 @@ edge uninstall infra --yes
 `edge install observability` uses the local `llm-observability-stack` chart. It
 validates the infra layer first, builds Helm dependencies, installs the chart,
 waits for Ollama, Open WebUI, and OpenTelemetry Collector, then runs validation.
+For GPU profiles, `edge-cli` does not allow bypassing infra validation and
+forcibly keeps `gpu-operator`, `nvidia-device-plugin`, and `dcgm-exporter`
+disabled in the observability chart. Those components belong to
+`k3s-nvidia-edge`.
+
+On single-GPU laptops, run `edge validate infra` before installing
+observability. After Ollama is running and reserving `nvidia.com/gpu: 1`,
+observability validation checks base readiness without launching another CUDA
+pod that would contend for the only GPU.
 
 Useful commands:
 
@@ -178,6 +193,7 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Live validation - 2026-07-08](docs/LIVE-VALIDATION-2026-07-08.md)
 - [Command reference](docs/COMMANDS.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

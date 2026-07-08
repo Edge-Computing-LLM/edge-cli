@@ -5,14 +5,16 @@
 
 ## Layers
 
-The platform is split into three layers:
+The platform is split into ordered layers:
 
-- `edge-cli`: command-line control plane, configuration, checks, workflows, and
+- Layer 0, `edge-cli`: command-line control plane, configuration, checks, workflows, and
   module orchestration.
-- `k3s-nvidia-edge`: infrastructure layer for Linux, k3s, NVIDIA Container
+- Layer 1, `k3s-nvidia-edge`: infrastructure layer for Linux, k3s, NVIDIA Container
   Toolkit, GPU Operator, RuntimeClass, and CUDA validation.
-- `llm-observability-stack`: LLMOps layer for Helm workloads such as Ollama,
+- Layer 2, `llm-observability-stack`: LLMOps layer for Helm workloads such as Ollama,
   Open WebUI, OpenTelemetry Collector, Prometheus, Grafana, and related tools.
+- Future Layer 3 repositories, such as a data/storage stack, should declare
+  their dependency on the previous layer before they can be installed.
 
 ## Module Model
 
@@ -33,6 +35,28 @@ interface:
 - validation workflow
 - status/logs where relevant
 - safe uninstall behavior
+
+Layer metadata lives in `internal/platform`. Install workflows run in catalog
+order. Uninstall workflows run in reverse order where layers own resources that
+depend on earlier layers.
+
+## Dependency Gates
+
+`llm-observability-stack` GPU profiles require a valid infra layer first:
+
+- `RuntimeClass/nvidia` exists
+- nodes advertise allocatable `nvidia.com/gpu`
+- GPU Operator/device plugin/DCGM are owned by `k3s-nvidia-edge`
+- CUDA validation succeeds from the infra layer
+
+`edge-cli` rejects GPU observability installs that try to skip infra validation.
+It also appends Helm overrides that keep `gpu-operator.enabled`,
+`nvidia-device-plugin.enabled`, and `dcgm-exporter.enabled` false in the
+observability chart.
+
+Full infra validation owns CUDA pod execution. Observability dependency checks
+verify the ready base layer without launching a CUDA pod, so validation remains
+usable after Ollama has reserved the only GPU on a low-VRAM laptop.
 
 ## Execution Model
 
@@ -61,5 +85,5 @@ gpu:
   vendor: nvidia
 ```
 
-AMD, Intel, Apple Silicon, and CPU-only accelerator abstractions are out of
+AMD, Intel, Apple Silicon, and CPU-first accelerator abstractions are out of
 scope.

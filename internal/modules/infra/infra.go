@@ -29,6 +29,7 @@ type Options struct {
 	Verbose            bool
 	DryRun             bool
 	RequireHostCUDA    bool
+	SkipCUDAValidation bool
 	InstallK3sChannel  string
 	InstallK3sExec     string
 }
@@ -80,7 +81,7 @@ func Status(ctx context.Context, opts Options) error {
 		r.Check(ctx, "nodes", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "wide"}}),
 		r.Check(ctx, "runtime classes", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass"}}),
 		r.Check(ctx, "helm releases", execx.Command{Name: "helm", Args: []string{"list", "-A"}}),
-		r.Check(ctx, "GPU Operator values", execx.Command{Name: "helm", Args: []string{"get", "values", "gpu-operator", "-n", "gpu-operator", "-o", "yaml"}}),
+		r.Check(ctx, "GPU Operator values", execx.Command{Name: "sh", Args: []string{"-c", "helm get values gpu-operator -n gpu-operator -o yaml 2>/dev/null || helm get values k3s-nvidia-edge -n gpu-operator -o yaml"}}),
 		r.Check(ctx, "GPU allocatable", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu"}}),
 	}
 	return execx.PrintResults(results)
@@ -138,6 +139,9 @@ func Validate(ctx context.Context, opts Options) error {
 	}
 	if err := execx.PrintResults(results); err != nil {
 		return err
+	}
+	if opts.SkipCUDAValidation {
+		return nil
 	}
 	return cudaValidation(ctx, r, opts)
 }
@@ -250,6 +254,9 @@ func installK3s(ctx context.Context, r execx.Runner, opts Options) error {
 }
 
 func prepareKubeconfig(ctx context.Context, r execx.Runner) error {
+	if _, err := r.Output(ctx, execx.Command{Name: "kubectl", Args: []string{"cluster-info"}}); err == nil {
+		return nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err

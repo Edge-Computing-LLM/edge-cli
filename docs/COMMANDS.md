@@ -44,6 +44,11 @@ edge install all --yes
 `edge install all` executes infra preflight, infra install, infra validation,
 observability install, and observability validation.
 
+For GPU observability profiles, the CLI validates the infra layer first and does
+not allow `llm-observability-stack` to install GPU Operator, NVIDIA device
+plugin, or DCGM exporter. Start from an empty local k3s cluster by running the
+infra install before observability.
+
 ## Validate
 
 ```bash
@@ -57,6 +62,8 @@ Operator pods, GPU allocatable resources, and a CUDA `nvidia-smi` validation pod
 `observability` validation checks infra first, then verifies the Helm release,
 namespace, Ollama, Open WebUI, OpenTelemetry Collector, optional
 Prometheus/Grafana services, pod readiness, and optional Ollama smoke behavior.
+It does not launch a second CUDA pod after Ollama is running, which avoids GPU
+contention on single-GPU workstations.
 
 ## Uninstall
 

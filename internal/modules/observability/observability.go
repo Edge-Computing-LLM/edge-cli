@@ -30,6 +30,12 @@ type Options struct {
 	SkipInfraCheck bool
 }
 
+var forcedBaseLayerDisables = []string{
+	"gpu-operator.enabled=false",
+	"nvidia-device-plugin.enabled=false",
+	"dcgm-exporter.enabled=false",
+}
+
 func DefaultOptions(repoPath, infraRepoPath, namespace string) Options {
 	return Options{
 		RepoPath:      repoPath,
@@ -49,9 +55,7 @@ func Doctor(ctx context.Context, opts Options) error {
 	}
 	r := runner(opts)
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra is not ready: %w", err)
 		}
@@ -86,10 +90,11 @@ func Install(ctx context.Context, opts Options) error {
 	if err := ValidateRepo(opts.RepoPath); err != nil {
 		return err
 	}
+	if err := ValidateInstallOptions(opts); err != nil {
+		return err
+	}
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra must validate before observability install: %w", err)
 		}
@@ -115,9 +120,7 @@ func Install(ctx context.Context, opts Options) error {
 
 func Validate(ctx context.Context, opts Options) error {
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra validation failed: %w", err)
 		}
@@ -156,7 +159,7 @@ func Uninstall(ctx context.Context, opts Options) error {
 		return errors.New("uninstall requires --yes; namespace and user data are kept unless deletion is requested by flags")
 	}
 	r := runner(opts)
-	if err := r.Run(ctx, execx.Command{Name: "helm", Args: []string{"uninstall", opts.Release, "-n", opts.Namespace, "--wait"}, Mutates: true}); err != nil {
+	if err := r.Run(ctx, execx.Command{Name: "helm", Args: []string{"uninstall", opts.Release, "-n", opts.Namespace, "--wait", "--ignore-not-found"}, Mutates: true}); err != nil {
 		fmt.Printf("observability uninstall returned: %v\n", err)
 	}
 	if !opts.KeepNamespace {
@@ -216,8 +219,29 @@ func ProfileValuesFile(profile string) string {
 	}
 }
 
+func GPUProfile(profile string) bool {
+	file := ProfileValuesFile(profile)
+	name := profile + " " + file
+	return !contains(name, "cpu")
+}
+
+func ValidateInstallOptions(opts Options) error {
+	if opts.SkipInfraCheck && GPUProfile(opts.Profile) {
+		return errors.New("cannot skip infra validation for GPU observability profiles; run edge install infra or edge validate infra first")
+	}
+	return nil
+}
+
 func runner(opts Options) execx.Runner {
 	return execx.Runner{Verbose: opts.Verbose, DryRun: opts.DryRun}
+}
+
+func infraDependencyOptions(opts Options) infra.Options {
+	infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
+	infraOpts.Verbose = opts.Verbose
+	infraOpts.DryRun = opts.DryRun
+	infraOpts.SkipCUDAValidation = true
+	return infraOpts
 }
 
 func optional(ctx context.Context, r execx.Runner, label string, cmd execx.Command) execx.Result {
@@ -237,7 +261,21 @@ func helmInstallArgs(opts Options) []string {
 	for _, set := range opts.SetValues {
 		args = append(args, "--set", set)
 	}
+	if GPUProfile(opts.Profile) {
+		for _, set := range forcedBaseLayerDisables {
+			args = append(args, "--set", set)
+		}
+	}
 	return args
+}
+
+func contains(value, needle string) bool {
+	for i := 0; i+len(needle) <= len(value); i++ {
+		if value[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return needle == ""
 }
 
 func applyOptionalCRDs(ctx context.Context, r execx.Runner, repoPath string) error {
@@ -247,10 +285,8 @@ func applyOptionalCRDs(ctx context.Context, r execx.Runner, repoPath string) err
 		return err
 	}
 	for _, file := range matches {
-		if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"create", "--save-config=false", "-f", file}, Mutates: true}); err != nil {
-			if applyErr := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"apply", "--server-side", "-f", file}, Mutates: true}); applyErr != nil {
-				return applyErr
-			}
+		if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"apply", "--server-side", "-f", file}, Mutates: true}); err != nil {
+			return err
 		}
 	}
 	return nil

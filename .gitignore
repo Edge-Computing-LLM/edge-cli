@@ -25,6 +25,10 @@ coverage.*
 *.bak
 *.swp
 *~
+local-run-output/
+validation-output/
+evidence/
+reports/
 
 # Editor and OS metadata
 .DS_Store
@@ -35,8 +39,13 @@ Thumbs.db
 # Kubernetes and Helm local artifacts
 kubeconfig
 *.kubeconfig
+*.kubeconfig.yaml
 /.helm/
 /.kube/
+*.tgz
+*.tar
+*.tar.gz
+*.zip
 
 # Vendored dependencies are not committed unless intentionally enabled later.
 /vendor/
