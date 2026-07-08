@@ -1,0 +1,42 @@
+# Build outputs
+/edge
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+*.out
+
+# Go coverage and profiling
+/coverage/
+coverage.*
+*.coverprofile
+*.prof
+
+# Local configuration and runtime files
+/.edge-cli/
+.env
+.env.*
+*.local
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# Editor and OS metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Kubernetes and Helm local artifacts
+kubeconfig
+*.kubeconfig
+/.helm/
+/.kube/
+
+# Vendored dependencies are not committed unless intentionally enabled later.
+/vendor/
