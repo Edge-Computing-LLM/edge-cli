@@ -1,12 +1,16 @@
 package observability
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProfileValuesFile(t *testing.T) {
 	cases := map[string]string{
 		"":                  "values.geforce-940m-k3s.yaml",
 		"geforce-940m-k3s":  "values.geforce-940m-k3s.yaml",
 		"local-k3s":         "values.local-k3s.yaml",
+		"cpu-k3s":           "values.cpu-k3s.yaml",
 		"custom-values.yml": "custom-values.yml",
 	}
 	for input, want := range cases {
@@ -33,6 +37,15 @@ func TestCPUInstallCanSkipInfraCheck(t *testing.T) {
 	}
 }
 
+func TestGPUDryRunCanSkipInfraCheck(t *testing.T) {
+	opts := DefaultOptions("/tmp/obs", "/tmp/infra", "llm-observability")
+	opts.SkipInfraCheck = true
+	opts.DryRun = true
+	if err := ValidateInstallOptions(opts); err != nil {
+		t.Fatalf("GPU dry run should not require a live infrastructure layer: %v", err)
+	}
+}
+
 func TestGPUHelmInstallForcesBaseLayerChartsDisabled(t *testing.T) {
 	opts := DefaultOptions("/tmp/obs", "/tmp/infra", "llm-observability")
 	opts.SetValues = []string{"nvidia-device-plugin.enabled=true"}
@@ -56,6 +69,25 @@ func TestObservabilityDependencyCheckDoesNotConsumeGPU(t *testing.T) {
 	infraOpts := infraDependencyOptions(opts)
 	if !infraOpts.SkipCUDAValidation {
 		t.Fatal("observability dependency check should skip CUDA pod validation")
+	}
+}
+
+func TestCPUObservabilityDependencyUsesBasicK3sValidation(t *testing.T) {
+	opts := DefaultOptions("/tmp/obs", "/tmp/infra", "llm-observability")
+	opts.Profile = "cpu-k3s"
+	infraOpts := infraDependencyOptions(opts)
+	if infraOpts.NVIDIAEnabled {
+		t.Fatal("CPU profile should not require NVIDIA infrastructure validation")
+	}
+}
+
+func TestReleaseStatusDecodesPendingInstallRevision(t *testing.T) {
+	var status releaseStatus
+	if err := json.Unmarshal([]byte(`{"info":{"status":"pending-install"},"version":3}`), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Info.Status != "pending-install" || status.Version != 3 {
+		t.Fatalf("unexpected release status: %+v", status)
 	}
 }
 

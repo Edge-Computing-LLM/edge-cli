@@ -11,6 +11,7 @@ import (
 	"github.com/Edge-Computing-LLM/edge-cli/internal/execx"
 	"github.com/Edge-Computing-LLM/edge-cli/internal/modules/infra"
 	"github.com/Edge-Computing-LLM/edge-cli/internal/modules/observability"
+	"github.com/Edge-Computing-LLM/edge-cli/internal/nvidia"
 	"github.com/spf13/cobra"
 )
 
@@ -159,6 +160,7 @@ func installObsCmd(g *globals) *cobra.Command {
 	var values repeated
 	var sets repeated
 	var skipInfra bool
+	var accelerator string
 	c := &cobra.Command{
 		Use:   "observability",
 		Short: "Install llm-observability-stack",
@@ -174,7 +176,15 @@ func installObsCmd(g *globals) *cobra.Command {
 			defer cancel()
 			opts := obsOpts(cfg, g, repoPath, values, sets)
 			opts.Yes = yes
-			opts.Profile = first(profile, opts.Profile)
+			if profile != "" {
+				opts.Profile = profile
+			} else {
+				mode, err := resolveAccelerator(ctx, accelerator, true, g)
+				if err != nil {
+					return err
+				}
+				opts.Profile = profileForAccelerator(mode)
+			}
 			opts.SkipInfraCheck = skipInfra
 			return observability.Install(ctx, opts)
 		},
@@ -185,12 +195,14 @@ func installObsCmd(g *globals) *cobra.Command {
 	c.Flags().Var(&values, "values", "additional Helm values file; may be repeated")
 	c.Flags().Var(&sets, "set", "additional Helm --set override; may be repeated")
 	c.Flags().BoolVar(&skipInfra, "skip-infra-check", false, "skip infra validation before install")
+	c.Flags().StringVar(&accelerator, "accelerator", "auto", "runtime accelerator: auto, nvidia, or cpu")
 	return c
 }
 
 func installAllCmd(g *globals) *cobra.Command {
 	var yes bool
 	var infraRepoPath, obsRepoPath string
+	var accelerator string
 	c := &cobra.Command{
 		Use:   "all",
 		Short: "Install infra, validate it, install observability, validate everything",
@@ -204,21 +216,32 @@ func installAllCmd(g *globals) *cobra.Command {
 				return err
 			}
 			defer cancel()
+			mode, err := resolveAccelerator(ctx, accelerator, false, g)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Selected accelerator: %s\n", mode)
 			iopts := infraOpts(cfg, g, infraRepoPath)
 			iopts.Yes = yes
-			if err := infra.Doctor(ctx, iopts); err != nil {
-				return err
+			if mode == "cpu" {
+				iopts.NVIDIAEnabled = false
+				iopts.SkipToolkitInstall = true
+				iopts.SkipGPUOperator = true
+				iopts.SkipCUDAValidation = true
+				iopts.InstallK3sExec = "server --write-kubeconfig-mode 0644 --disable traefik --disable servicelb --disable metrics-server --node-label workload=edge-ai"
 			}
 			if err := infra.Install(ctx, iopts); err != nil {
 				return err
 			}
-			if err := infra.Validate(ctx, iopts); err != nil {
-				return err
-			}
 			oopts := obsOpts(cfg, g, obsRepoPath, nil, nil)
 			oopts.Yes = yes
+			oopts.Profile = profileForAccelerator(mode)
+			oopts.SkipInfraCheck = g.DryRun
 			if err := observability.Install(ctx, oopts); err != nil {
 				return err
+			}
+			if g.DryRun {
+				return nil
 			}
 			if err := observability.Validate(ctx, oopts); err != nil {
 				return err
@@ -233,6 +256,7 @@ func installAllCmd(g *globals) *cobra.Command {
 	c.Flags().BoolVar(&yes, "yes", false, "execute mutating operations")
 	c.Flags().StringVar(&infraRepoPath, "infra-repo-path", "", "path to k3s-nvidia-edge repo")
 	c.Flags().StringVar(&obsRepoPath, "observability-repo-path", "", "path to llm-observability-stack repo")
+	c.Flags().StringVar(&accelerator, "accelerator", "auto", "runtime accelerator: auto, nvidia, or cpu")
 	return c
 }
 
@@ -330,7 +354,8 @@ func validateCmd(g *globals) *cobra.Command {
 }
 
 func validateInfraCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
+	var skipCUDA bool
+	c := &cobra.Command{
 		Use:   "infra",
 		Short: "Validate k3s + NVIDIA GPU readiness",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -343,9 +368,13 @@ func validateInfraCmd(g *globals) *cobra.Command {
 				return err
 			}
 			defer cancel()
-			return infra.Validate(ctx, infraOpts(cfg, g, ""))
+			opts := infraOpts(cfg, g, "")
+			opts.SkipCUDAValidation = skipCUDA
+			return infra.Validate(ctx, opts)
 		},
 	}
+	c.Flags().BoolVar(&skipCUDA, "skip-cuda", false, "skip the CUDA pod when the GPU is occupied by a workload")
+	return c
 }
 
 func validateObsCmd(g *globals) *cobra.Command {
@@ -500,7 +529,7 @@ func obsOpts(cfg config.Config, g *globals, repoPath string, values, sets []stri
 	opts := observability.DefaultOptions(first(repoPath, cfg.Repos.LLMObservabilityStack), cfg.Repos.K3sNvidiaEdge, cfg.Cluster.DefaultNamespace)
 	opts.Verbose = g.Verbose
 	opts.DryRun = g.DryRun
-	opts.Timeout = "5m"
+	opts.Timeout = g.Timeout
 	opts.ValuesFiles = values
 	opts.SetValues = sets
 	return opts
@@ -511,7 +540,9 @@ func contextWithTimeout(value string) (context.Context, context.CancelFunc, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid --timeout: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), d)
+	// Give Helm and kubectl enough time to report their own timeout diagnostics
+	// and perform cleanup before the parent process is cancelled.
+	ctx, cancel := context.WithTimeout(context.Background(), d+30*time.Second)
 	return ctx, cancel, nil
 }
 
@@ -522,4 +553,37 @@ func first(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func resolveAccelerator(ctx context.Context, requested string, cluster bool, g *globals) (string, error) {
+	if requested == "" {
+		requested = "auto"
+	}
+	switch requested {
+	case "cpu", "nvidia":
+		return requested, nil
+	case "auto":
+	default:
+		return "", fmt.Errorf("invalid accelerator %q: must be auto, nvidia, or cpu", requested)
+	}
+	r := execx.Runner{Verbose: g.Verbose}
+	if cluster {
+		if nvidia.ClusterAvailable(ctx, r) {
+			return "nvidia", nil
+		}
+		fmt.Println("Kubernetes does not advertise nvidia.com/gpu; selecting CPU profile")
+		return "cpu", nil
+	}
+	if nvidia.HostAvailable(ctx, r) {
+		return "nvidia", nil
+	}
+	fmt.Println("No working NVIDIA GPU detected on the host; skipping NVIDIA components")
+	return "cpu", nil
+}
+
+func profileForAccelerator(accelerator string) string {
+	if accelerator == "cpu" {
+		return "cpu-k3s"
+	}
+	return "geforce-940m-k3s"
 }

@@ -9,8 +9,8 @@ It coordinates two current layers:
 - `llm-observability-stack`: LLMOps workloads, Helm charts, Open WebUI, Ollama,
   OpenTelemetry, Prometheus, Grafana, and related services.
 
-The CLI is intentionally NVIDIA-only. It does not include AMD, Intel, Apple
-Silicon, or CPU-first accelerator abstractions.
+The CLI supports automatic NVIDIA/CPU selection. It does not currently install
+AMD, Intel, or Apple Silicon accelerator runtimes.
 
 ## Why this exists
 
@@ -52,8 +52,8 @@ Default configuration:
 
 ```yaml
 repos:
-  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/k3s-nvidia-edge
-  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/llm-observability-stack
+  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/k3s-nvidia-edge
+  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/llm-observability-stack
 cluster:
   kubeconfig: ""
   defaultNamespace: llm-observability
@@ -86,16 +86,26 @@ edge repo doctor
 ## Full Install
 
 ```bash
-edge doctor
-edge install all --yes
+edge install all --accelerator auto --yes
 edge status
+```
+
+`auto` deploys the NVIDIA infrastructure layer when `nvidia-smi` detects a
+working GPU. Without NVIDIA hardware it skips the toolkit and GPU Operator,
+installs or validates basic k3s, and selects `values.cpu-k3s.yaml`.
+
+Explicit modes are useful in automation:
+
+```bash
+edge install all --accelerator nvidia --yes
+edge install all --accelerator cpu --yes
 ```
 
 `edge install all` runs:
 
-1. Infra diagnostics.
-2. Linux/k3s/NVIDIA GPU infrastructure install.
-3. Infra validation and CUDA validation pod.
+1. Host accelerator detection.
+2. Linux/k3s installation and accelerator-specific infrastructure setup.
+3. Basic k3s validation, plus NVIDIA and CUDA validation in NVIDIA mode.
 4. `llm-observability-stack` Helm install.
 5. Observability validation.
 6. Next command and URL hints.
@@ -193,6 +203,9 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Accelerator selection](docs/ACCELERATOR-MODES.md)
+- [Local dependency and repository inventory](docs/LOCAL-DEPENDENCY-INVENTORY.md)
+- [Live validation - 2026-07-17](docs/LIVE-VALIDATION-2026-07-17.md)
 - [Live validation - 2026-07-08](docs/LIVE-VALIDATION-2026-07-08.md)
 - [Command reference](docs/COMMANDS.md)
 - [Configuration](docs/CONFIGURATION.md)
