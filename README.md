@@ -15,6 +15,11 @@ a read-only evidence companion for the deployed Qwen runtime. It consumes the
 status produced by these layers; `edge-cli` does not install it as another
 cluster layer.
 
+[`Frontend-Edge-LLM-Observability`](https://github.com/Edge-Computing-LLM/Frontend-Edge-LLM-Observability)
+is the TypeScript/Vue presentation companion. It is also outside the ordered
+cluster lifecycle and consumes controlled metrics endpoints rather than direct
+host or Kubernetes credentials.
+
 The CLI supports automatic NVIDIA/CPU selection. It does not currently install
 AMD, Intel, or Apple Silicon accelerator runtimes.
 
@@ -213,6 +218,7 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Programming language and script boundaries](docs/LANGUAGE-BOUNDARIES.md)
 - [Accelerator selection](docs/ACCELERATOR-MODES.md)
 - [Local dependency and repository inventory](docs/LOCAL-DEPENDENCY-INVENTORY.md)
 - [Live validation - 2026-07-17](docs/LIVE-VALIDATION-2026-07-17.md)
