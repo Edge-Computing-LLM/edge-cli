@@ -9,6 +9,12 @@ It coordinates two current layers:
 - `llm-observability-stack`: LLMOps workloads, Helm charts, Open WebUI, Ollama,
   OpenTelemetry, Prometheus, Grafana, and related services.
 
+The organization also publishes
+[`qwen-gguf-observability`](https://github.com/Edge-Computing-LLM/qwen-gguf-observability),
+a read-only evidence companion for the deployed Qwen runtime. It consumes the
+status produced by these layers; `edge-cli` does not install it as another
+cluster layer.
+
 The CLI supports automatic NVIDIA/CPU selection. It does not currently install
 AMD, Intel, or Apple Silicon accelerator runtimes.
 
@@ -216,3 +222,4 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+- [Qwen GGUF runtime evidence companion](https://github.com/Edge-Computing-LLM/qwen-gguf-observability)
