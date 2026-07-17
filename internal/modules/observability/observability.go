@@ -2,10 +2,13 @@ package observability
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/Edge-Computing-LLM/edge-cli/internal/execx"
 	"github.com/Edge-Computing-LLM/edge-cli/internal/kubernetes"
@@ -30,17 +33,31 @@ type Options struct {
 	SkipInfraCheck bool
 }
 
+var forcedBaseLayerDisables = []string{
+	"gpu-operator.enabled=false",
+	"nvidia-device-plugin.enabled=false",
+	"dcgm-exporter.enabled=false",
+}
+
 func DefaultOptions(repoPath, infraRepoPath, namespace string) Options {
+	profile := "geforce-940m-k3s"
 	return Options{
 		RepoPath:      repoPath,
 		InfraRepoPath: infraRepoPath,
 		Namespace:     namespace,
 		Release:       "llm-observability-stack",
-		Profile:       "geforce-940m-k3s",
+		Profile:       profile,
 		Timeout:       "5m",
-		Model:         "gemma3-1b-it-gguf-local",
+		Model:         ModelForProfile(profile),
 		OllamaSmoke:   true,
 	}
+}
+
+func ModelForProfile(profile string) string {
+	if ProfileValuesFile(profile) == "values.geforce-940m-k3s.yaml" {
+		return "qwen-1-8b-chat-q4-k-m-local"
+	}
+	return "gemma3-1b-it-gguf-local"
 }
 
 func Doctor(ctx context.Context, opts Options) error {
@@ -49,9 +66,7 @@ func Doctor(ctx context.Context, opts Options) error {
 	}
 	r := runner(opts)
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra is not ready: %w", err)
 		}
@@ -73,23 +88,31 @@ func Doctor(ctx context.Context, opts Options) error {
 func Status(ctx context.Context, opts Options) error {
 	r := runner(opts)
 	results := []execx.Result{
-		r.Check(ctx, "base GPU layer", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
-		r.Check(ctx, "NVIDIA RuntimeClass", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass", "nvidia"}}),
 		r.Check(ctx, "Helm release", execx.Command{Name: "helm", Args: []string{"status", opts.Release, "-n", opts.Namespace}}),
 		r.Check(ctx, "LLM workloads", execx.Command{Name: "kubectl", Args: []string{"get", "pods,deploy,statefulset,svc,pvc", "-n", opts.Namespace, "-o", "wide"}}),
 		r.Check(ctx, "Ollama models", execx.Command{Name: "kubectl", Args: []string{"exec", "-n", opts.Namespace, "deploy/ollama", "--", "ollama", "list"}}),
+	}
+	if GPUProfile(opts.Profile) {
+		results = append([]execx.Result{
+			r.Check(ctx, "base GPU layer", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
+			r.Check(ctx, "NVIDIA RuntimeClass", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass", "nvidia"}}),
+		}, results...)
 	}
 	return execx.PrintResults(results)
 }
 
 func Install(ctx context.Context, opts Options) error {
+	if !opts.Yes && !opts.DryRun {
+		return errors.New("install requires --yes; use --dry-run to preview changes")
+	}
 	if err := ValidateRepo(opts.RepoPath); err != nil {
 		return err
 	}
+	if err := ValidateInstallOptions(opts); err != nil {
+		return err
+	}
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra must validate before observability install: %w", err)
 		}
@@ -101,8 +124,14 @@ func Install(ctx context.Context, opts Options) error {
 	if err := r.Run(ctx, execx.Command{Name: "helm", Args: []string{"dependency", "build", "."}, Dir: opts.RepoPath, Mutates: true}); err != nil {
 		return err
 	}
+	if err := recoverPendingInstall(ctx, r, opts); err != nil {
+		return err
+	}
 	if err := r.Run(ctx, execx.Command{Name: "helm", Args: helmInstallArgs(opts), Dir: opts.RepoPath, Mutates: true}); err != nil {
 		return err
+	}
+	if opts.DryRun {
+		return nil
 	}
 	k := kubernetes.Client{Runner: r}
 	for _, rollout := range []string{"deploy/ollama", "statefulset/open-webui", "deploy/opentelemetry-collector"} {
@@ -115,9 +144,7 @@ func Install(ctx context.Context, opts Options) error {
 
 func Validate(ctx context.Context, opts Options) error {
 	if !opts.SkipInfraCheck {
-		infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
-		infraOpts.Verbose = opts.Verbose
-		infraOpts.DryRun = opts.DryRun
+		infraOpts := infraDependencyOptions(opts)
 		if err := infra.Validate(ctx, infraOpts); err != nil {
 			return fmt.Errorf("infra validation failed: %w", err)
 		}
@@ -132,7 +159,9 @@ func Validate(ctx context.Context, opts Options) error {
 		k.Service(ctx, opts.Namespace, "opentelemetry-collector"),
 		optional(ctx, r, "Prometheus service", execx.Command{Name: "kubectl", Args: []string{"get", "svc", "-n", opts.Namespace, "kube-prometheus-stack-prometheus"}}),
 		optional(ctx, r, "Grafana service", execx.Command{Name: "kubectl", Args: []string{"get", "svc", "-n", opts.Namespace, "llm-observability-stack-grafana"}}),
-		r.Check(ctx, "Ollama GPU limits", execx.Command{Name: "kubectl", Args: []string{"get", "deploy", "-n", opts.Namespace, "ollama", "-o", "jsonpath={.spec.template.spec.runtimeClassName}{\"\\n\"}{.spec.template.spec.containers[0].resources.limits.nvidia\\.com/gpu}{\"\\n\"}"}}),
+	}
+	if GPUProfile(opts.Profile) {
+		results = append(results, r.Check(ctx, "Ollama GPU limits", execx.Command{Name: "kubectl", Args: []string{"get", "deploy", "-n", opts.Namespace, "ollama", "-o", "jsonpath={.spec.template.spec.runtimeClassName}{\"\\n\"}{.spec.template.spec.containers[0].resources.limits.nvidia\\.com/gpu}{\"\\n\"}"}}))
 	}
 	if err := execx.PrintResults(results); err != nil {
 		return err
@@ -156,7 +185,7 @@ func Uninstall(ctx context.Context, opts Options) error {
 		return errors.New("uninstall requires --yes; namespace and user data are kept unless deletion is requested by flags")
 	}
 	r := runner(opts)
-	if err := r.Run(ctx, execx.Command{Name: "helm", Args: []string{"uninstall", opts.Release, "-n", opts.Namespace, "--wait"}, Mutates: true}); err != nil {
+	if err := r.Run(ctx, execx.Command{Name: "helm", Args: []string{"uninstall", opts.Release, "-n", opts.Namespace, "--wait", "--ignore-not-found"}, Mutates: true}); err != nil {
 		fmt.Printf("observability uninstall returned: %v\n", err)
 	}
 	if !opts.KeepNamespace {
@@ -209,6 +238,8 @@ func ProfileValuesFile(profile string) string {
 		return "values.enterprise-pilot-k3s.yaml"
 	case "validation-k3s":
 		return "values.validation-k3s.yaml"
+	case "cpu-k3s":
+		return "values.cpu-k3s.yaml"
 	case "full-stack-nvidia":
 		return "values.full-stack-nvidia.example.yaml"
 	default:
@@ -216,8 +247,30 @@ func ProfileValuesFile(profile string) string {
 	}
 }
 
+func GPUProfile(profile string) bool {
+	file := ProfileValuesFile(profile)
+	name := profile + " " + file
+	return !contains(name, "cpu")
+}
+
+func ValidateInstallOptions(opts Options) error {
+	if opts.SkipInfraCheck && GPUProfile(opts.Profile) && !opts.DryRun {
+		return errors.New("cannot skip infra validation for GPU observability profiles; run edge install infra or edge validate infra first")
+	}
+	return nil
+}
+
 func runner(opts Options) execx.Runner {
 	return execx.Runner{Verbose: opts.Verbose, DryRun: opts.DryRun}
+}
+
+func infraDependencyOptions(opts Options) infra.Options {
+	infraOpts := infra.DefaultOptions(opts.InfraRepoPath)
+	infraOpts.Verbose = opts.Verbose
+	infraOpts.DryRun = opts.DryRun
+	infraOpts.SkipCUDAValidation = true
+	infraOpts.NVIDIAEnabled = GPUProfile(opts.Profile)
+	return infraOpts
 }
 
 func optional(ctx context.Context, r execx.Runner, label string, cmd execx.Command) execx.Result {
@@ -237,7 +290,53 @@ func helmInstallArgs(opts Options) []string {
 	for _, set := range opts.SetValues {
 		args = append(args, "--set", set)
 	}
+	if GPUProfile(opts.Profile) {
+		for _, set := range forcedBaseLayerDisables {
+			args = append(args, "--set", set)
+		}
+	}
 	return args
+}
+
+type releaseStatus struct {
+	Info struct {
+		Status string `json:"status"`
+	} `json:"info"`
+	Version int `json:"version"`
+}
+
+func recoverPendingInstall(ctx context.Context, r execx.Runner, opts Options) error {
+	out, err := r.Output(ctx, execx.Command{Name: "helm", Args: []string{"status", opts.Release, "-n", opts.Namespace, "-o", "json"}})
+	if err != nil {
+		if strings.Contains(strings.ToLower(out), "release: not found") || strings.Contains(strings.ToLower(out), "release not found") {
+			return nil
+		}
+		return fmt.Errorf("inspect existing Helm release: %s: %w", out, err)
+	}
+	var status releaseStatus
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		return fmt.Errorf("decode Helm release status: %w", err)
+	}
+	if status.Info.Status != "pending-install" {
+		return nil
+	}
+	if status.Version < 1 {
+		return errors.New("Helm reports pending-install without a valid revision")
+	}
+	fmt.Printf("Recovering interrupted Helm install at revision %d\n", status.Version)
+	return r.Run(ctx, execx.Command{Name: "helm", Args: []string{
+		"rollback", opts.Release, strconv.Itoa(status.Version), "-n", opts.Namespace,
+		"--wait", "--timeout", opts.Timeout,
+	}, Mutates: true})
+}
+
+func contains(value, needle string) bool {
+	for i := 0; i+len(needle) <= len(value); i++ {
+		if value[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return needle == ""
 }
 
 func applyOptionalCRDs(ctx context.Context, r execx.Runner, repoPath string) error {
@@ -247,10 +346,8 @@ func applyOptionalCRDs(ctx context.Context, r execx.Runner, repoPath string) err
 		return err
 	}
 	for _, file := range matches {
-		if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"create", "--save-config=false", "-f", file}, Mutates: true}); err != nil {
-			if applyErr := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"apply", "--server-side", "-f", file}, Mutates: true}); applyErr != nil {
-				return applyErr
-			}
+		if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"apply", "--server-side", "-f", file}, Mutates: true}); err != nil {
+			return err
 		}
 	}
 	return nil

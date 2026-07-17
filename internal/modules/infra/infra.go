@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Edge-Computing-LLM/edge-cli/internal/execx"
 	"github.com/Edge-Computing-LLM/edge-cli/internal/kubernetes"
@@ -29,8 +30,10 @@ type Options struct {
 	Verbose            bool
 	DryRun             bool
 	RequireHostCUDA    bool
+	SkipCUDAValidation bool
 	InstallK3sChannel  string
 	InstallK3sExec     string
+	NVIDIAEnabled      bool
 }
 
 func DefaultOptions(repoPath string) Options {
@@ -43,6 +46,7 @@ func DefaultOptions(repoPath string) Options {
 		RequireHostCUDA:    false,
 		InstallK3sChannel:  "stable",
 		InstallK3sExec:     "server --write-kubeconfig-mode 0644 --disable traefik --disable servicelb --disable metrics-server --node-label gpu=nvidia --node-label workload=edge-ai",
+		NVIDIAEnabled:      true,
 	}
 }
 
@@ -54,8 +58,11 @@ func Doctor(ctx context.Context, opts Options) error {
 	} else {
 		results = append(results, execx.Result{Label: "Linux OS", Output: out})
 	}
-	results = append(results, execx.RequiredCommands("sudo", "curl", "apt-get", "systemctl", "kubectl", "helm", "nvidia-smi")...)
-	results = append(results, nvidia.Checks(ctx, r)...)
+	results = append(results, execx.RequiredCommands("sudo", "curl", "apt-get", "systemctl", "kubectl", "helm")...)
+	if opts.NVIDIAEnabled {
+		results = append(results, execx.RequiredCommands("nvidia-smi")...)
+		results = append(results, nvidia.Checks(ctx, r)...)
+	}
 	results = append(results,
 		r.Check(ctx, "k3s service", execx.Command{Name: "systemctl", Args: []string{"is-active", "k3s"}}),
 		r.Check(ctx, "kubectl status", execx.Command{Name: "kubectl", Args: []string{"cluster-info"}}),
@@ -63,13 +70,15 @@ func Doctor(ctx context.Context, opts Options) error {
 		r.Check(ctx, "containerd runtime", execx.Command{Name: "systemctl", Args: []string{"is-active", "k3s"}}),
 	)
 	k := kubernetes.Client{Runner: r}
-	results = append(results,
-		k.Nodes(ctx),
-		k.RuntimeClassNvidia(ctx),
-		r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
-		r.Check(ctx, "GPU allocatable", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu"}}),
-		r.Check(ctx, "CUDA validation support", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass", "nvidia"}}),
-	)
+	results = append(results, k.Nodes(ctx))
+	if opts.NVIDIAEnabled {
+		results = append(results,
+			k.RuntimeClassNvidia(ctx),
+			r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
+			gpuCapacityResult(ctx, r),
+			r.Check(ctx, "CUDA validation support", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass", "nvidia"}}),
+		)
+	}
 	return execx.PrintResults(results)
 }
 
@@ -80,13 +89,16 @@ func Status(ctx context.Context, opts Options) error {
 		r.Check(ctx, "nodes", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "wide"}}),
 		r.Check(ctx, "runtime classes", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass"}}),
 		r.Check(ctx, "helm releases", execx.Command{Name: "helm", Args: []string{"list", "-A"}}),
-		r.Check(ctx, "GPU Operator values", execx.Command{Name: "helm", Args: []string{"get", "values", "gpu-operator", "-n", "gpu-operator", "-o", "yaml"}}),
+		r.Check(ctx, "GPU Operator values", execx.Command{Name: "sh", Args: []string{"-c", "helm get values gpu-operator -n gpu-operator -o yaml 2>/dev/null || helm get values k3s-nvidia-edge -n gpu-operator -o yaml"}}),
 		r.Check(ctx, "GPU allocatable", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu"}}),
 	}
 	return execx.PrintResults(results)
 }
 
 func Install(ctx context.Context, opts Options) error {
+	if !opts.Yes && !opts.DryRun {
+		return errors.New("install requires --yes; use --dry-run to preview changes")
+	}
 	if err := ValidateRepo(opts.RepoPath); err != nil {
 		return err
 	}
@@ -102,7 +114,7 @@ func Install(ctx context.Context, opts Options) error {
 			return err
 		}
 	}
-	if !opts.SkipToolkitInstall {
+	if opts.NVIDIAEnabled && !opts.SkipToolkitInstall {
 		if err := installNvidiaToolkit(ctx, r); err != nil {
 			return err
 		}
@@ -118,10 +130,13 @@ func Install(ctx context.Context, opts Options) error {
 	if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"wait", "--for=condition=Ready", "node", "--all", "--timeout=180s"}, Mutates: true}); err != nil {
 		return err
 	}
-	if !opts.SkipGPUOperator {
+	if opts.NVIDIAEnabled && !opts.SkipGPUOperator {
 		if err := installGPUOperator(ctx, r, opts); err != nil {
 			return err
 		}
+	}
+	if opts.DryRun {
+		return nil
 	}
 	return Validate(ctx, opts)
 }
@@ -132,12 +147,19 @@ func Validate(ctx context.Context, opts Options) error {
 	results := []execx.Result{
 		k.ClusterInfo(ctx),
 		k.Nodes(ctx),
-		k.RuntimeClassNvidia(ctx),
-		r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
-		r.Check(ctx, "GPU allocatable", execx.Command{Name: "kubectl", Args: []string{"get", "nodes", "-o", "custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu"}}),
+	}
+	if opts.NVIDIAEnabled {
+		results = append(results,
+			k.RuntimeClassNvidia(ctx),
+			r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
+			gpuCapacityResult(ctx, r),
+		)
 	}
 	if err := execx.PrintResults(results); err != nil {
 		return err
+	}
+	if !opts.NVIDIAEnabled || opts.SkipCUDAValidation {
+		return nil
 	}
 	return cudaValidation(ctx, r, opts)
 }
@@ -182,6 +204,16 @@ func runner(opts Options) execx.Runner {
 	return execx.Runner{Verbose: opts.Verbose, DryRun: opts.DryRun}
 }
 
+func gpuCapacityResult(ctx context.Context, r execx.Runner) execx.Result {
+	out, err := r.Output(ctx, execx.Command{Name: "kubectl", Args: []string{
+		"get", "nodes", "-o", "jsonpath={range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}",
+	}})
+	if err == nil && !nvidia.HasAllocatableGPU(out) {
+		err = fmt.Errorf("no node advertises a positive %s allocatable resource", nvidia.GPUResource)
+	}
+	return execx.Result{Label: "GPU allocatable", Output: out, Err: err}
+}
+
 func hostPreflight(ctx context.Context, opts Options) error {
 	r := runner(opts)
 	results := []execx.Result{}
@@ -190,8 +222,11 @@ func hostPreflight(ctx context.Context, opts Options) error {
 	} else {
 		results = append(results, execx.Result{Label: "Linux OS", Output: out})
 	}
-	results = append(results, execx.RequiredCommands("sudo", "curl", "apt-get", "systemctl", "kubectl", "helm", "nvidia-smi")...)
-	results = append(results, r.Check(ctx, "NVIDIA driver", execx.Command{Name: "nvidia-smi"}))
+	results = append(results, execx.RequiredCommands("sudo", "curl", "apt-get", "systemctl", "kubectl", "helm")...)
+	if opts.NVIDIAEnabled {
+		results = append(results, execx.RequiredCommands("nvidia-smi")...)
+		results = append(results, r.Check(ctx, "NVIDIA driver", execx.Command{Name: "nvidia-smi"}))
+	}
 	if err := execx.PrintResults(results); err != nil {
 		return err
 	}
@@ -250,6 +285,9 @@ func installK3s(ctx context.Context, r execx.Runner, opts Options) error {
 }
 
 func prepareKubeconfig(ctx context.Context, r execx.Runner) error {
+	if _, err := r.Output(ctx, execx.Command{Name: "kubectl", Args: []string{"cluster-info"}}); err == nil {
+		return nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -320,13 +358,18 @@ func cudaValidation(ctx context.Context, r execx.Runner, opts Options) error {
 	if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"apply", "-f", tmp}, Mutates: true}); err != nil {
 		return err
 	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = r.Run(cleanupCtx, execx.Command{Name: "kubectl", Args: []string{"delete", "pod", "cuda-test", "--ignore-not-found"}, Mutates: true})
+	}()
 	if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/cuda-test", "--timeout=180s"}, Mutates: true}); err != nil {
 		return err
 	}
 	if err := r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"logs", "cuda-test"}}); err != nil {
 		return err
 	}
-	return r.Run(ctx, execx.Command{Name: "kubectl", Args: []string{"delete", "pod", "cuda-test"}, Mutates: true})
+	return nil
 }
 
 func cudaManifest(image string) string {

@@ -9,8 +9,19 @@ It coordinates two current layers:
 - `llm-observability-stack`: LLMOps workloads, Helm charts, Open WebUI, Ollama,
   OpenTelemetry, Prometheus, Grafana, and related services.
 
-The CLI is intentionally NVIDIA-only. It does not include AMD, Intel, Apple
-Silicon, or CPU-only accelerator abstractions.
+The organization also publishes
+[`qwen-gguf-observability`](https://github.com/Edge-Computing-LLM/qwen-gguf-observability),
+a read-only evidence companion for the deployed Qwen runtime. It consumes the
+status produced by these layers; `edge-cli` does not install it as another
+cluster layer.
+
+[`Frontend-Edge-LLM-Observability`](https://github.com/Edge-Computing-LLM/Frontend-Edge-LLM-Observability)
+is the TypeScript/Vue presentation companion. It is also outside the ordered
+cluster lifecycle and consumes controlled metrics endpoints rather than direct
+host or Kubernetes credentials.
+
+The CLI supports automatic NVIDIA/CPU selection. It does not currently install
+AMD, Intel, or Apple Silicon accelerator runtimes.
 
 ## Why this exists
 
@@ -19,7 +30,8 @@ workloads. `edge-cli` provides one installable control plane so operators can ru
 preflight checks, installs, validation, status, logs, and safe uninstall flows
 without treating each repository as a disconnected CLI application.
 
-Future repositories can be added as new Go modules under `internal/modules`.
+Future repositories can be added as new layers in `internal/platform` and new Go
+modules under `internal/modules`.
 
 ## Install
 
@@ -51,8 +63,8 @@ Default configuration:
 
 ```yaml
 repos:
-  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/k3s-nvidia-edge
-  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/llm-observability-stack
+  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/k3s-nvidia-edge
+  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/llm-observability-stack
 cluster:
   kubeconfig: ""
   defaultNamespace: llm-observability
@@ -85,19 +97,38 @@ edge repo doctor
 ## Full Install
 
 ```bash
-edge doctor
-edge install all --yes
+edge install all --accelerator auto --yes
 edge status
+```
+
+`auto` deploys the NVIDIA infrastructure layer when `nvidia-smi` detects a
+working GPU. Without NVIDIA hardware it skips the toolkit and GPU Operator,
+installs or validates basic k3s, and selects `values.cpu-k3s.yaml`.
+
+On the validated GeForce 940M profile, the application smoke test targets
+`qwen-1-8b-chat-q4-k-m-local`; CPU and general profiles retain their configured
+Gemma model defaults.
+
+Explicit modes are useful in automation:
+
+```bash
+edge install all --accelerator nvidia --yes
+edge install all --accelerator cpu --yes
 ```
 
 `edge install all` runs:
 
-1. Infra diagnostics.
-2. Linux/k3s/NVIDIA GPU infrastructure install.
-3. Infra validation and CUDA validation pod.
+1. Host accelerator detection.
+2. Linux/k3s installation and accelerator-specific infrastructure setup.
+3. Basic k3s validation, plus NVIDIA and CUDA validation in NVIDIA mode.
 4. `llm-observability-stack` Helm install.
 5. Observability validation.
 6. Next command and URL hints.
+
+An empty local k3s cluster with only the default k3s system components is a
+valid starting point. `edge install infra` is responsible for preparing the
+NVIDIA runtime and GPU Operator layer before any GPU-backed LLM workload is
+installed.
 
 ## Infra Layer
 
@@ -122,6 +153,15 @@ edge uninstall infra --yes
 `edge install observability` uses the local `llm-observability-stack` chart. It
 validates the infra layer first, builds Helm dependencies, installs the chart,
 waits for Ollama, Open WebUI, and OpenTelemetry Collector, then runs validation.
+For GPU profiles, `edge-cli` does not allow bypassing infra validation and
+forcibly keeps `gpu-operator`, `nvidia-device-plugin`, and `dcgm-exporter`
+disabled in the observability chart. Those components belong to
+`k3s-nvidia-edge`.
+
+On single-GPU laptops, run `edge validate infra` before installing
+observability. After Ollama is running and reserving `nvidia.com/gpu: 1`,
+observability validation checks base readiness without launching another CUDA
+pod that would contend for the only GPU.
 
 Useful commands:
 
@@ -178,8 +218,14 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Programming language and script boundaries](docs/LANGUAGE-BOUNDARIES.md)
+- [Accelerator selection](docs/ACCELERATOR-MODES.md)
+- [Local dependency and repository inventory](docs/LOCAL-DEPENDENCY-INVENTORY.md)
+- [Live validation - 2026-07-17](docs/LIVE-VALIDATION-2026-07-17.md)
+- [Live validation - 2026-07-08](docs/LIVE-VALIDATION-2026-07-08.md)
 - [Command reference](docs/COMMANDS.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+- [Qwen GGUF runtime evidence companion](https://github.com/Edge-Computing-LLM/qwen-gguf-observability)
