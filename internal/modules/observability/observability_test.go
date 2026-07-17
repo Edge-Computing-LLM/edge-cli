@@ -20,6 +20,15 @@ func TestProfileValuesFile(t *testing.T) {
 	}
 }
 
+func TestModelForProfile(t *testing.T) {
+	if got := ModelForProfile("geforce-940m-k3s"); got != "qwen-1-8b-chat-q4-k-m-local" {
+		t.Fatalf("GeForce model = %q", got)
+	}
+	if got := ModelForProfile("cpu-k3s"); got != "gemma3-1b-it-gguf-local" {
+		t.Fatalf("CPU model = %q", got)
+	}
+}
+
 func TestGPUInstallCannotSkipInfraCheck(t *testing.T) {
 	opts := DefaultOptions("/tmp/obs", "/tmp/infra", "llm-observability")
 	opts.SkipInfraCheck = true

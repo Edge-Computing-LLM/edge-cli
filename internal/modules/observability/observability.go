@@ -40,16 +40,24 @@ var forcedBaseLayerDisables = []string{
 }
 
 func DefaultOptions(repoPath, infraRepoPath, namespace string) Options {
+	profile := "geforce-940m-k3s"
 	return Options{
 		RepoPath:      repoPath,
 		InfraRepoPath: infraRepoPath,
 		Namespace:     namespace,
 		Release:       "llm-observability-stack",
-		Profile:       "geforce-940m-k3s",
+		Profile:       profile,
 		Timeout:       "5m",
-		Model:         "gemma3-1b-it-gguf-local",
+		Model:         ModelForProfile(profile),
 		OllamaSmoke:   true,
 	}
+}
+
+func ModelForProfile(profile string) string {
+	if ProfileValuesFile(profile) == "values.geforce-940m-k3s.yaml" {
+		return "qwen-1-8b-chat-q4-k-m-local"
+	}
+	return "gemma3-1b-it-gguf-local"
 }
 
 func Doctor(ctx context.Context, opts Options) error {

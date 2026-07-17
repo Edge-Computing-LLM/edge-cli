@@ -94,6 +94,10 @@ edge status
 working GPU. Without NVIDIA hardware it skips the toolkit and GPU Operator,
 installs or validates basic k3s, and selects `values.cpu-k3s.yaml`.
 
+On the validated GeForce 940M profile, the application smoke test targets
+`qwen-1-8b-chat-q4-k-m-local`; CPU and general profiles retain their configured
+Gemma model defaults.
+
 Explicit modes are useful in automation:
 
 ```bash

@@ -185,6 +185,7 @@ func installObsCmd(g *globals) *cobra.Command {
 				}
 				opts.Profile = profileForAccelerator(mode)
 			}
+			opts.Model = observability.ModelForProfile(opts.Profile)
 			opts.SkipInfraCheck = skipInfra
 			return observability.Install(ctx, opts)
 		},
@@ -236,6 +237,7 @@ func installAllCmd(g *globals) *cobra.Command {
 			oopts := obsOpts(cfg, g, obsRepoPath, nil, nil)
 			oopts.Yes = yes
 			oopts.Profile = profileForAccelerator(mode)
+			oopts.Model = observability.ModelForProfile(oopts.Profile)
 			oopts.SkipInfraCheck = g.DryRun
 			if err := observability.Install(ctx, oopts); err != nil {
 				return err
