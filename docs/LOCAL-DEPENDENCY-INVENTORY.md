@@ -84,5 +84,5 @@ boundary.
 
 The inventory combined Git remote enumeration for every `.git` worktree with
 repository URL extraction, Go module files, Helm `Chart.yaml`/`Chart.lock`, Python
-requirements, npm lock metadata, CI workflows, and runtime manifests from all four
+requirements, npm lock metadata, CI workflows, and runtime manifests from all five
 organization projects. Credentials and generated build output were excluded.
