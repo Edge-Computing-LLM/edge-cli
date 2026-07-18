@@ -14,7 +14,7 @@ lockfiles, generated package metadata, and documentation.
 | Infrastructure | `Edge-Computing-LLM/k3s-nvidia-edge` | Install or validate k3s and, conditionally, NVIDIA Container Toolkit, GPU Operator, RuntimeClass, device plugin, and DCGM. |
 | Application | `Edge-Computing-LLM/llm-observability-stack` | Deploy CPU- or GPU-profiled Ollama, Open WebUI, OpenTelemetry, Prometheus, and Grafana workloads. |
 | Evidence | `Edge-Computing-LLM/qwen-gguf-observability` | Validate the live Qwen runtime contract and capture sanitized evidence without owning cluster resources. |
-| Dashboard | `Edge-Computing-LLM/Frontend-Edge-LLM-Observability` | Present LLM, Kubernetes, and accelerator telemetry. |
+| Dashboard | Grafana JSON in `Edge-Computing-LLM/llm-observability-stack` | Present LLM, Kubernetes, and accelerator telemetry through Helm provisioning. |
 
 The NVIDIA infrastructure layer is conditional. CPU hosts skip its GPU-specific
 components and deploy the application layer with `values.cpu-k3s.yaml`.
@@ -59,8 +59,7 @@ instead.
 | Kubernetes | `kubernetes/kubernetes` | Released k3s/Kubernetes binaries and APIs |
 | NVIDIA | `NVIDIA/k8s-dra-driver-gpu` | Reference/documentation; the current platform uses the device plugin and GPU Operator path |
 | Metrics | `prometheus/prometheus`, `prometheus/alertmanager`, `prometheus/node_exporter`, `prometheus/blackbox_exporter`, `kubernetes/kube-state-metrics`, `grafana/grafana` | Vendored Helm charts and released images |
-| Python service | `fastapi/fastapi`, `encode/uvicorn`, `pydantic/pydantic`, `langchain-ai/langchain`, `encode/httpx`, `prometheus/client_python` | Pinned Python 3.11 packages in `langchain-demo/requirements.txt` |
-| Frontend | `ag-grid/ag-grid`, `primefaces/primevue`, `primefaces/primeicons`, `vuejs/core`, `ecomfe/vue-echarts`, `tailwindlabs/tailwindcss`, `vitejs/vite` | Locked npm packages; `apache/echarts` is already local |
+| Go telemetry | `prometheus/client_golang`, `open-telemetry/opentelemetry-go` | Versioned Go modules used by the Ollama gateway and edge toolbox |
 | Tika | `apache/tika`, `apache/tika-docker` | Released chart/image; `apache/tika-helm` is local |
 | Documentation tooling | `norwoodj/helm-docs`, `helm-unittest/helm-unittest` | Optional development tooling |
 
@@ -77,12 +76,12 @@ boundary.
   clean, current clone is sufficient.
 - The NVIDIA DRA repository referenced as `NVIDIA/k8s-dra-driver-gpu` is distinct
   from the locally available `kubernetes-sigs/dra-driver-nvidia-gpu`.
-- `Frontend-Edge-LLM-Observability` is the actual organization repository name;
-  use that case in documentation and remotes.
+- The former standalone frontend was retired; Grafana dashboard JSON is the
+  organization-owned presentation source.
 
 ## Audit method
 
 The inventory combined Git remote enumeration for every `.git` worktree with
 repository URL extraction, Go module files, Helm `Chart.yaml`/`Chart.lock`, Python
-requirements, npm lock metadata, CI workflows, and runtime manifests from all five
+requirements, npm lock metadata, CI workflows, and runtime manifests from all four
 organization projects. Credentials and generated build output were excluded.

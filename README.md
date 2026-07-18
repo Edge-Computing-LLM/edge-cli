@@ -15,10 +15,9 @@ a read-only evidence companion for the deployed Qwen runtime. It consumes the
 status produced by these layers; `edge-cli` does not install it as another
 cluster layer.
 
-[`Frontend-Edge-LLM-Observability`](https://github.com/Edge-Computing-LLM/Frontend-Edge-LLM-Observability)
-is the TypeScript/Vue presentation companion. It is also outside the ordered
-cluster lifecycle and consumes controlled metrics endpoints rather than direct
-host or Kubernetes credentials.
+Dashboard presentation is owned by the Helm-provisioned Grafana dashboards in
+`llm-observability-stack`; there is no separate browser repository or
+browser-side Kubernetes credential path.
 
 The CLI supports automatic NVIDIA/CPU selection. It does not currently install
 AMD, Intel, or Apple Silicon accelerator runtimes.
