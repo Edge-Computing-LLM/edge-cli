@@ -10,8 +10,8 @@ It coordinates two current layers:
   OpenTelemetry, Prometheus, Grafana, and related services.
 
 The organization also publishes
-[`qwen-gguf-observability`](https://github.com/Edge-Computing-LLM/qwen-gguf-observability),
-a read-only evidence companion for the deployed Qwen runtime. It consumes the
+[`gguf-observability`](https://github.com/Edge-Computing-LLM/gguf-observability),
+a read-only evidence companion for deployed GGUF model runtimes. It consumes the
 status produced by these layers; `edge-cli` does not install it as another
 cluster layer.
 
@@ -227,4 +227,4 @@ commands such as `kubectl`, `helm`, `apt-get`, `systemctl`, `k3s`, and
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
-- [Qwen GGUF runtime evidence companion](https://github.com/Edge-Computing-LLM/qwen-gguf-observability)
+- [Multi-model GGUF runtime evidence companion](https://github.com/Edge-Computing-LLM/gguf-observability)

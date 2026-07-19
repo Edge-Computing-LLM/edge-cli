@@ -13,7 +13,7 @@ The platform is split into ordered layers:
   Toolkit, GPU Operator, RuntimeClass, and CUDA validation.
 - Layer 2, `llm-observability-stack`: LLMOps layer for Helm workloads such as Ollama,
   Open WebUI, OpenTelemetry Collector, Prometheus, Grafana, and related tools.
-- Evidence companion, `qwen-gguf-observability`: read-only Qwen runtime contract
+- Evidence companion, `gguf-observability`: read-only, model-selectable GGUF runtime contract
   checks and sanitized point-in-time evidence. It owns no cluster resources and
   is intentionally outside the ordered install/uninstall layer graph.
 - Future Layer 3 repositories that deploy resources, such as a data/storage
@@ -62,7 +62,7 @@ Full infra validation owns CUDA pod execution. Observability dependency checks
 verify the ready base layer without launching a CUDA pod, so validation remains
 usable after Ollama has reserved the only GPU on a low-VRAM laptop.
 
-After Layer 2 is healthy, `qwen-gguf-observability` may independently read the
+After Layer 2 is healthy, `gguf-observability` may independently read the
 Kubernetes, Helm, Ollama, and `nvidia-smi` status surfaces. This avoids copying
 deployment logic into an evidence repository or coupling evidence capture to an
 `edge install` operation.

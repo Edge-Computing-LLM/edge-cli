@@ -22,8 +22,8 @@ edge config show
 
 ```yaml
 repos:
-  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/k3s-nvidia-edge
-  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Edge-Computing-LLM/llm-observability-stack
+  k3sNvidiaEdge: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/k3s-nvidia-edge
+  llmObservabilityStack: /media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia/Project-Edge-Computing-LLM/llm-observability-stack
 
 cluster:
   kubeconfig: ""
