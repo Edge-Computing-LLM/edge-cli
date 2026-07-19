@@ -18,7 +18,7 @@ every repository into one implementation language.
   Operator profile.
 - `llm-observability-stack`: Helm/YAML for resources and Go for its helper CLI,
   gateway, toolbox, benchmark, Kubernetes inspection, telemetry, and tests.
-- `qwen-gguf-observability`: dependency-free Go for structured, read-only
+- `gguf-observability`: dependency-free Go for structured, read-only
   evidence collection.
 - Grafana JSON in `llm-observability-stack`: browser presentation.
 

@@ -16,7 +16,7 @@ lockfiles, generated package metadata, and documentation.
 | Control | `Edge-Computing-LLM/edge-cli` | Detect the accelerator, orchestrate installation, and expose status and validation commands. |
 | Infrastructure | `Edge-Computing-LLM/k3s-nvidia-edge` | Install or validate k3s and, conditionally, NVIDIA Container Toolkit, GPU Operator, RuntimeClass, device plugin, and DCGM. |
 | Application | `Edge-Computing-LLM/llm-observability-stack` | Deploy CPU- or GPU-profiled Ollama, Open WebUI, OpenTelemetry, Prometheus, and Grafana workloads. |
-| Evidence | `Edge-Computing-LLM/qwen-gguf-observability` | Validate the live Qwen runtime contract and capture sanitized evidence without owning cluster resources. |
+| Evidence | `Edge-Computing-LLM/gguf-observability` | Validate selected live GGUF model contracts and capture sanitized evidence without owning cluster resources. |
 | Dashboard | Grafana JSON in `Edge-Computing-LLM/llm-observability-stack` | Present LLM, Kubernetes, and accelerator telemetry through Helm provisioning. |
 
 The NVIDIA infrastructure layer is conditional. CPU hosts skip its GPU-specific
