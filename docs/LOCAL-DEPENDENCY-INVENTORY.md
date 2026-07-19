@@ -1,8 +1,11 @@
 # Local dependency and repository inventory
 
-Validated on 2026-07-17 against
+Validated again on 2026-07-19 against
 `/media/waqasm86/External1/Waqas-Projects/Project-Linux-Kubernetes-Nvidia`.
-The scan found 58 local Git worktrees. This document distinguishes the platform's
+The scan found 64 local Git worktrees. See
+[LOCAL-REPOSITORY-AUDIT-2026-07-19.md](LOCAL-REPOSITORY-AUDIT-2026-07-19.md)
+for fetch, synchronization, test, release, and live-cluster results. This
+document distinguishes the platform's
 direct source/runtime dependencies from incidental links in vendored charts,
 lockfiles, generated package metadata, and documentation.
 

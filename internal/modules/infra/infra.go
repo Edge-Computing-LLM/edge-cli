@@ -71,10 +71,11 @@ func Doctor(ctx context.Context, opts Options) error {
 	)
 	k := kubernetes.Client{Runner: r}
 	results = append(results, k.Nodes(ctx))
+	results = append(results, k.LocalNodeAddress(ctx))
 	if opts.NVIDIAEnabled {
 		results = append(results,
 			k.RuntimeClassNvidia(ctx),
-			r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
+			k.PodsReady(ctx, "gpu-operator"),
 			gpuCapacityResult(ctx, r),
 			r.Check(ctx, "CUDA validation support", execx.Command{Name: "kubectl", Args: []string{"get", "runtimeclass", "nvidia"}}),
 		)
@@ -147,11 +148,12 @@ func Validate(ctx context.Context, opts Options) error {
 	results := []execx.Result{
 		k.ClusterInfo(ctx),
 		k.Nodes(ctx),
+		k.LocalNodeAddress(ctx),
 	}
 	if opts.NVIDIAEnabled {
 		results = append(results,
 			k.RuntimeClassNvidia(ctx),
-			r.Check(ctx, "GPU Operator pods", execx.Command{Name: "kubectl", Args: []string{"get", "pods", "-n", "gpu-operator", "-o", "wide"}}),
+			k.PodsReady(ctx, "gpu-operator"),
 			gpuCapacityResult(ctx, r),
 		)
 	}
